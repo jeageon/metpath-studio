@@ -133,11 +133,95 @@ function normalizeOverlayId(value: string): string {
   if (!compact) {
     return compact;
   }
-  return compact.startsWith('rn:') ? compact.slice(3) : compact;
+  const noQuote = compact.replace(/^["']|["']$/g, '');
+  const noWs = noQuote.replace(/[\s_]/g, '');
+  return noWs.replace(/^rn[:#]/, '').replace(/^reaction[:-]/, '');
+}
+
+function collectOverlayLookupKeys(rawId: string): string[] {
+  const base = normalizeOverlayId(rawId);
+  if (!base) {
+    return [];
+  }
+
+  const keys = new Set<string>();
+  keys.add(base);
+  keys.add(base.replace(/^rn:/, ''));
+  keys.add(base.replace(/^r/, ''));
+  keys.add(`rn:${base}`);
+  keys.add(`rn:${base.replace(/^r/, '')}`);
+  keys.add(base.replace(/^rn:/, 'r'));
+  keys.add(base.toUpperCase());
+  keys.add(base.toUpperCase().replace(/^RN:/, 'R'));
+
+  return [...keys].filter(Boolean);
+}
+
+function collectLookupCandidates(set: Set<string>, rawValue: string): void {
+  collectOverlayLookupKeys(rawValue).forEach((normalized) => {
+    set.add(normalized);
+    set.add(normalizeOverlayId(normalized));
+    set.add(String(normalized).toUpperCase());
+  });
+}
+
+function tokenizeReactionText(rawText: string): string[] {
+  const expanded = rawText
+    .replace(/[\n\r]/g, ' ')
+    .replace(/[|,;()]/g, ' ')
+    .trim();
+  if (!expanded) {
+    return [];
+  }
+
+  return expanded
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function collectEdgeLookupCandidates(edge: EdgeSingular): string[] {
+  const candidates = new Set<string>();
+
+  collectLookupCandidates(candidates, String(edge.data('reaction_id') || ''));
+  collectLookupCandidates(candidates, String(edge.data('reaction_name') || ''));
+  collectLookupCandidates(candidates, String(edge.data('label') || ''));
+  collectLookupCandidates(candidates, String(edge.data('base_label') || ''));
+  collectLookupCandidates(candidates, edge.id());
+
+  const rawBase = String(edge.data('base_label') || '').toLowerCase().split('|')[0];
+  tokenizeReactionText(rawBase).forEach((token) => {
+    collectLookupCandidates(candidates, token);
+  });
+
+  const rawReactionName = String(edge.data('reaction_name') || '');
+  tokenizeReactionText(rawReactionName).forEach((token) => {
+    collectLookupCandidates(candidates, token);
+  });
+
+  const normalizedId = normalizeOverlayId(rawReactionName);
+  if (normalizedId) {
+    collectLookupCandidates(candidates, normalizedId);
+  }
+
+  return [...candidates];
+}
+
+function parseLineValues(rawLine: string): string[] {
+  if (rawLine.includes(',')) {
+    return parseCsvLine(rawLine);
+  }
+  if (rawLine.includes('\t')) {
+    return rawLine
+      .split('\t')
+      .map((value) => value.trim().replace(/^["']|["']$/g, ''));
+  }
+  return rawLine.split(',').map((value) => value.trim());
 }
 
 function parseCsvOverlay(fileText: string): CsvOverlayRecord[] {
   const lines = fileText
+    .replace(/^\uFEFF/, '')
     .split(/\r\n|\r|\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -146,50 +230,49 @@ function parseCsvOverlay(fileText: string): CsvOverlayRecord[] {
     return [];
   }
 
-  const firstLine = parseCsvLine(lines[0] || '');
+  const firstLine = parseLineValues(lines[0] || '');
   const hasHeader =
     firstLine.some((col) => col.toLowerCase().includes('id')) &&
-    firstLine.some((col) => col.toLowerCase().includes('value'));
+    firstLine.some((col) => /(value|log2|fold|flux|fc|score)/i.test(col));
 
   const startIndex = hasHeader ? 1 : 0;
-  const idIndex = hasHeader ? firstLine.findIndex((col) => /id|reaction|gene/i.test(col)) : 0;
-  const valueIndex = hasHeader ? firstLine.findIndex((col) => /log2|fold|value|flux|fc/i.test(col)) : 1;
+  const idIndex = hasHeader ? firstLine.findIndex((col) => /id|reaction|gene|node|edge|cpd/i.test(col)) : 0;
+  const valueIndex = hasHeader ? firstLine.findIndex((col) => /(value|log2|fold|flux|fc|score|change)/i.test(col)) : 1;
+  const resolvedIdIndex = idIndex < 0 ? 0 : idIndex;
+  const resolvedValueIndex = valueIndex < 0 ? 1 : valueIndex;
 
   const rows = new Map<string, number>();
   for (let i = startIndex; i < lines.length; i += 1) {
-    const line = parseCsvLine(lines[i]);
+    const line = parseLineValues(lines[i]);
     if (line.length === 0) {
       continue;
     }
 
-    const rawId = normalizeOverlayId(line[idIndex] || '');
-    const rawValue = parseFloat((line[valueIndex] || '').replace(/,/g, '').trim());
+    const rawId = line[resolvedIdIndex] || '';
+    const rawValue = Number.parseFloat((line[resolvedValueIndex] || '').replace(/,/g, '').trim());
     if (!rawId || Number.isNaN(rawValue)) {
       continue;
     }
 
-    rows.set(rawId, rawValue);
-    const rnKey = normalizeOverlayId(`rn:${rawId}`);
-    rows.set(rnKey, rawValue);
+    collectOverlayLookupKeys(rawId).forEach((normalized) => {
+      rows.set(normalized, rawValue);
+    });
   }
 
   return [...rows].map(([id, value]) => ({ id, value }));
 }
 
 function overlayValueForEdge(edge: EdgeSingular, lookup: Map<string, number>): number | null {
-  const candidates = new Set<string>();
-  candidates.add(normalizeOverlayId(String(edge.data('reaction_id') || '')));
-  candidates.add(normalizeOverlayId(String(edge.data('label') || '')));
-  candidates.add(normalizeOverlayId(edge.id()));
-  candidates.add(normalizeOverlayId(String(edge.data('base_label') || '')));
-  candidates.add(`rn:${normalizeOverlayId(String(edge.data('reaction_id') || ''))}`);
+  const candidates = new Set(collectEdgeLookupCandidates(edge));
+  for (const rawTerm of tokenizeReactionText(String(edge.data('base_label') || ''))) {
+    collectLookupCandidates(candidates, rawTerm);
+  }
 
-  const rawLabel = String(edge.data('base_label') || '').toLowerCase();
-  const labelTerms = rawLabel.split('|')[0].split(/[\s,]/).map((term) => term.trim()).filter(Boolean);
-  labelTerms.forEach((term) => {
-    candidates.add(normalizeOverlayId(term));
-    candidates.add(`rn:${normalizeOverlayId(term)}`);
-  });
+  const label = String(edge.data('base_label') || '').split('|')[0];
+  const rawTokens = tokenizeReactionText(label);
+  for (const token of rawTokens) {
+    collectLookupCandidates(candidates, token);
+  }
 
   for (const candidate of candidates) {
     const value = lookup.get(candidate);
@@ -447,7 +530,7 @@ export default function App(): JSX.Element {
       const edgeId = edge.id;
       out.push({
         group: 'edges',
-        data: {
+            data: {
           id: edgeId,
           source: edge.source,
           target: edge.target,
@@ -457,6 +540,7 @@ export default function App(): JSX.Element {
           display_label: makeDisplayLabel(edge),
           annotation,
           reaction_id: edge.reaction_id || '',
+          reaction_name: edge.reaction_name || '',
         },
       });
 
