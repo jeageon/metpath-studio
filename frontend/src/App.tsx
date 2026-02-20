@@ -121,6 +121,10 @@ function saveBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function defaultExportBasename(pathway: PathwayResponse | null): string {
+  return `${pathway?.pathway_id || 'pathway'}_${Date.now()}`;
+}
+
 function parseCsvLine(rawLine: string): string[] {
   const out: string[] = [];
   let current = '';
@@ -1038,14 +1042,14 @@ export default function App(): JSX.Element {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${pathway?.pathway_id || 'pathway'}_${Date.now()}.svg`;
+      link.download = `${defaultExportBasename(pathway)}.svg`;
       link.click();
       URL.revokeObjectURL(url);
       return;
     }
     const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
     const pngBlob = await fetch(png).then((response) => response.blob());
-    saveBlob(pngBlob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.png`);
+    saveBlob(pngBlob, `${defaultExportBasename(pathway)}.png`);
   };
 
   const exportPng = async () => {
@@ -1055,7 +1059,7 @@ export default function App(): JSX.Element {
     const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
     const response = await fetch(png);
     const blob = await response.blob();
-    saveBlob(blob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.png`);
+    saveBlob(blob, `${defaultExportBasename(pathway)}.png`);
   };
 
   const exportTiff = async () => {
@@ -1088,7 +1092,7 @@ export default function App(): JSX.Element {
       const imageData = context.getImageData(0, 0, width, height).data;
       const tiffBuffer = UTIF.encodeImage(new Uint8Array(imageData.buffer), width, height);
       const blob = new Blob([tiffBuffer], { type: 'image/tiff' });
-      saveBlob(blob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.tif`);
+      saveBlob(blob, `${defaultExportBasename(pathway)}.tif`);
       setError('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'TIF Export를 실패했습니다.');
@@ -1198,9 +1202,9 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="control-row footer-actions">
-          <button onClick={exportSvg}>SVG Export</button>
-          <button onClick={exportPng}>PNG Export</button>
-          <button onClick={exportTiff}>TIFF Export</button>
+          <button onClick={exportSvg}>SVG</button>
+          <button onClick={exportPng}>PNG</button>
+          <button onClick={exportTiff}>TIFF</button>
           <span className="selection-pill">
             선택 엣지: {selectedEdgeIds.length}
           </span>
