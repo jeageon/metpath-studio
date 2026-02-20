@@ -1,6 +1,7 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, EdgeSingular, ElementDefinition } from 'cytoscape';
+import * as UTIF from 'utif';
 
 import { fetchPathway, importSbml } from './api';
 import type { EdgeStatus, PathwayEdge, PathwayResponse } from './types';
@@ -100,6 +101,24 @@ function toDisplayFromData(edge: EdgeSingular): string {
   const label = String(edge.data('base_label') || edge.data('label') || 'reaction');
   const annotation = String(edge.data('annotation') || '').trim();
   return `${label}${annotation ? ` | ${annotation}` : ''}`;
+}
+
+function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('failed to decode image'));
+    image.src = dataUrl;
+  });
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function parseCsvLine(rawLine: string): string[] {
@@ -1025,10 +1044,55 @@ export default function App(): JSX.Element {
       return;
     }
     const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
-    const link = document.createElement('a');
-    link.href = png;
-    link.download = `${pathway?.pathway_id || 'pathway'}_${Date.now()}.png`;
-    link.click();
+    const pngBlob = await fetch(png).then((response) => response.blob());
+    saveBlob(pngBlob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.png`);
+  };
+
+  const exportPng = async () => {
+    const core = cyRef.current;
+    if (!core) return;
+
+    const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
+    const response = await fetch(png);
+    const blob = await response.blob();
+    saveBlob(blob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.png`);
+  };
+
+  const exportTiff = async () => {
+    const core = cyRef.current;
+    if (!core) {
+      return;
+    }
+
+    const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
+    try {
+      const image = await loadImageFromDataUrl(png);
+      const width = image.naturalWidth || image.width;
+      const height = image.naturalHeight || image.height;
+      if (!width || !height) {
+        setError('TIF Export용 이미지 크기를 확인할 수 없습니다.');
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext('2d');
+      if (!context) {
+        setError('TIF Export용 canvas 컨텍스트를 만들지 못했습니다.');
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      const imageData = context.getImageData(0, 0, width, height).data;
+      const tiffBuffer = UTIF.encodeImage(new Uint8Array(imageData.buffer), width, height);
+      const blob = new Blob([tiffBuffer], { type: 'image/tiff' });
+      saveBlob(blob, `${pathway?.pathway_id || 'pathway'}_${Date.now()}.tif`);
+      setError('');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'TIF Export를 실패했습니다.');
+    }
   };
 
   return (
@@ -1135,6 +1199,8 @@ export default function App(): JSX.Element {
 
         <div className="control-row footer-actions">
           <button onClick={exportSvg}>SVG Export</button>
+          <button onClick={exportPng}>PNG Export</button>
+          <button onClick={exportTiff}>TIFF Export</button>
           <span className="selection-pill">
             선택 엣지: {selectedEdgeIds.length}
           </span>
