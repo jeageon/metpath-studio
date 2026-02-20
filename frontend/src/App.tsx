@@ -1102,95 +1102,115 @@ export default function App(): JSX.Element {
   return (
     <div className="app-root">
       <header className="hero">
-        <h1>MetPath Studio</h1>
-        <p>KEGG pathway → 논문 스타일 대사 지도 편집기</p>
+        <div>
+          <h1>MetPath Studio</h1>
+          <p>KEGG pathway → 논문 스타일 대사 지도 편집기</p>
+        </div>
+        <div className="hero-meta">
+          <span className="pill">
+            {pathway ? `현재 경로: ${pathway.pathway_id}` : '현재 경로: 미선택'}
+          </span>
+          <span className="pill">선택 엣지: {selectedEdgeIds.length}개</span>
+        </div>
       </header>
 
       <section className="control-panel">
-        <div className="control-row">
-          <input
-            value={pathwayIdInput}
-            onChange={(event) => setPathwayIdInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                onLoadPathway();
-              }
-            }}
-            placeholder="Pathway ID (ex: eco00670)"
-          />
-          <button onClick={onLoadPathway} disabled={loading}>
-            {loading ? '불러오는 중...' : 'Load KEGG'}
-          </button>
-          <input
-            ref={sbmlUploadRef}
-            type="file"
-            accept=".sbml,.xml,application/xml,text/xml"
-            className="file-input"
-            onChange={onLoadSbml}
-          />
-          <button onClick={() => sbmlUploadRef.current?.click()}>
-            SBML 임포트
-          </button>
-          <button onClick={onDeleteSelection} className="warn">
-            선택 항목 삭제
-          </button>
-          <button
-            onClick={() => {
-              setHideCofactors(!hideCofactors);
-            }}
-          >
-            {hideCofactors ? '조효소 숨김 취소' : '조효소 일괄 숨기기'}
-          </button>
+        <div className="control-section">
+          <h3 className="section-title">1. 경로 가져오기</h3>
+          <div className="field-row">
+            <input
+              value={pathwayIdInput}
+              onChange={(event) => setPathwayIdInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  onLoadPathway();
+                }
+              }}
+              placeholder="Pathway ID (ex: eco00670)"
+              aria-label="Pathway ID"
+            />
+            <button className="primary" onClick={onLoadPathway} disabled={loading}>
+              {loading ? '불러오는 중...' : 'KEGG 불러오기'}
+            </button>
+          </div>
+          <div className="field-row">
+            <input
+              ref={sbmlUploadRef}
+              type="file"
+              accept=".sbml,.xml,application/xml,text/xml"
+              className="file-input"
+              onChange={onLoadSbml}
+            />
+            <button onClick={() => sbmlUploadRef.current?.click()}>SBML 임포트</button>
+            <button
+              onClick={() => {
+                setHideCofactors(!hideCofactors);
+              }}
+            >
+              {hideCofactors ? '조효소 숨김 취소' : '조효소 일괄 숨김'}
+            </button>
+          </div>
         </div>
 
-        <div className="control-row">
+        <div className="control-section">
+          <h3 className="section-title">2. 엣지 상태 및 라우팅</h3>
+          <div className="control-row">
             <button onClick={() => applyEdgeStatus('upregulated')}>Upregulated</button>
             <button onClick={() => applyEdgeStatus('downregulated')}>Downregulated</button>
             <button onClick={() => applyEdgeStatus('removed')}>Knock-out</button>
-            <label className="slider">
+            <button onClick={onDeleteSelection} className="warn">
+              선택 항목 삭제
+            </button>
+          </div>
+          <div className="field-row">
+            <label className="control-label">
               Bézier 곡률
-            <input
-              type="range"
-              min={0}
-              max={90}
-              value={curveValue}
-              onChange={(event) => applyCurve(Number(event.target.value))}
-            />
-          </label>
-          <label className="annotation">
-            라우팅
-            <button
-              className={routingMode === 'bezier' ? 'active' : ''}
-              onClick={() => setRoutingMode('bezier')}
-            >
-              Bezier
-            </button>
-            <button
-              className={routingMode === 'orthogonal' ? 'active' : ''}
-              onClick={() => setRoutingMode('orthogonal')}
-            >
-              Orthogonal
-            </button>
-          </label>
+              <input
+                type="range"
+                min={0}
+                max={90}
+                value={curveValue}
+                onChange={(event) => applyCurve(Number(event.target.value))}
+              />
+            </label>
+            <label className="control-label">라우팅</label>
+            <div className="segmented">
+              <button
+                className={routingMode === 'bezier' ? 'active' : ''}
+                onClick={() => setRoutingMode('bezier')}
+              >
+                Bezier
+              </button>
+              <button
+                className={routingMode === 'orthogonal' ? 'active' : ''}
+                onClick={() => setRoutingMode('orthogonal')}
+              >
+                Orthogonal
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="control-row">
-          <button onClick={applyTcaRing}>TCA Ring 정렬</button>
-          <button onClick={applyGlycolysisFlow}>Glycolysis 수직 정렬</button>
-          <input
-            ref={csvUploadRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="file-input"
-            onChange={onUploadCsv}
-          />
-          <button onClick={() => csvUploadRef.current?.click()}>
-            CSV 오버레이 업로드
-          </button>
-          <button onClick={onClearOverlay} className="warn">
-            오버레이 초기화
-          </button>
-          <label className="annotation">
+        <div className="control-section">
+          <h3 className="section-title">3. 정렬/데이터</h3>
+          <div className="control-row">
+            <button onClick={applyTcaRing}>TCA Ring 정렬</button>
+            <button onClick={applyGlycolysisFlow}>Glycolysis 수직 정렬</button>
+          </div>
+          <div className="field-row">
+            <input
+              ref={csvUploadRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="file-input"
+              onChange={onUploadCsv}
+            />
+            <button onClick={() => csvUploadRef.current?.click()}>CSV 오버레이 업로드</button>
+            <button onClick={onClearOverlay} className="warn">
+              오버레이 초기화
+            </button>
+          </div>
+          <label className="control-label wide">
             카세트 텍스트 박스
             <input
               value={edgeAnnotation}
@@ -1201,16 +1221,27 @@ export default function App(): JSX.Element {
           </label>
         </div>
 
-        <div className="control-row footer-actions">
-          <button onClick={exportSvg}>SVG</button>
-          <button onClick={exportPng}>PNG</button>
-          <button onClick={exportTiff}>TIFF</button>
-          <span className="selection-pill">
-            선택 엣지: {selectedEdgeIds.length}
-          </span>
-          <span className="selection-pill">
-            상태: {pathway ? `${pathway.pathway_name}` : '미선택'}
-          </span>
+        <div className="control-section">
+          <h3 className="section-title">4. 파일 추출</h3>
+          <div className="control-row">
+            <button onClick={exportSvg} className="primary">
+              SVG
+            </button>
+            <button onClick={exportPng} className="primary">
+              PNG
+            </button>
+            <button onClick={exportTiff} className="primary">
+              TIFF
+            </button>
+          </div>
+          <div className="status-row">
+            <span className="selection-pill">
+              오버레이: {overlaySummary ? `${overlaySummary.count}개` : '0개'}
+            </span>
+            <span className="selection-pill">
+              반응 스타일: {pathway ? `${pathway.pathway_name}` : '미선택'}
+            </span>
+          </div>
         </div>
       </section>
 
