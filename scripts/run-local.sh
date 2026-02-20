@@ -13,6 +13,21 @@ BACKEND_PID_FILE="$RUNTIME_DIR/metpath-backend.pid"
 FRONTEND_PID_FILE="$RUNTIME_DIR/metpath-frontend.pid"
 BACKEND_LOG_FILE="$RUNTIME_DIR/metpath-backend.log"
 FRONTEND_LOG_FILE="$RUNTIME_DIR/metpath-frontend.log"
+NPM_INSTALL_LOG_FILE="/tmp/metpath-frontend-npm-install.log"
+
+require_cmds() {
+  local missing=0
+  for cmd in python3 pip3 curl npm; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "[ERROR] required command not found: $cmd" >&2
+      missing=1
+    fi
+  done
+  if ((missing)); then
+    echo "[ERROR] install missing dependencies first." >&2
+    exit 1
+  fi
+}
 
 is_running() {
   local pid_file="$1"
@@ -49,6 +64,18 @@ wait_for_http() {
   return 1
 }
 
+show_log_tail() {
+  local file=$1
+  local label=$2
+
+  echo "[TRACE] ${label} log tail (last 30 lines):"
+  if [[ -f "$file" ]]; then
+    tail -n 30 "$file"
+  else
+    echo "  (not found)"
+  fi
+}
+
 start_backend() {
   if is_running "$BACKEND_PID_FILE" "backend"; then
     return
@@ -78,6 +105,7 @@ start_backend() {
   fi
 
   echo "[ERROR] backend did not become ready. logs: $BACKEND_LOG_FILE" >&2
+  show_log_tail "$BACKEND_LOG_FILE" "backend"
   exit 1
 }
 
@@ -87,7 +115,7 @@ start_frontend() {
   fi
 
   echo "[INFO] setup frontend"
-  (cd "$FRONTEND_DIR" && npm install) >/tmp/metpath-frontend-npm-install.log 2>&1
+  (cd "$FRONTEND_DIR" && npm install) >"$NPM_INSTALL_LOG_FILE" 2>&1
 
   echo "[INFO] starting frontend : http://127.0.0.1:$FRONTEND_PORT"
   (
@@ -104,6 +132,9 @@ start_frontend() {
   fi
 
   echo "[ERROR] frontend did not become ready. logs: $FRONTEND_LOG_FILE" >&2
+  echo "[TRACE] npm install log (last 30 lines):"
+  tail -n 30 "$NPM_INSTALL_LOG_FILE"
+  show_log_tail "$FRONTEND_LOG_FILE" "frontend"
   exit 1
 }
 
@@ -113,6 +144,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
+require_cmds
 start_backend
 start_frontend
 

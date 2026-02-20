@@ -20,6 +20,12 @@ Stop:
 bash scripts/stop-local.sh
 ```
 
+Smoke test:
+
+```bash
+bash scripts/check-local.sh
+```
+
 ### 포트 기본값
 
 - Backend: `8000` (`METPATH_BACKEND_PORT`)
@@ -53,6 +59,12 @@ Visit:
 - Frontend: `http://127.0.0.1:5173`
 - Backend health: `http://127.0.0.1:8000/health`
 - Sample API: `http://127.0.0.1:8000/api/pathway/eco00670`
+
+또는 바로 체크 스크립트 실행:
+
+```bash
+bash scripts/check-local.sh
+```
 
 ## Current phase
 
