@@ -16,3 +16,18 @@ export async function fetchPathway(pathwayId: string, hideCofactors = false): Pr
   }
   return response.json();
 }
+
+export async function importSbml(file: File): Promise<PathwayResponse> {
+  const form = new FormData();
+  form.append('file', file);
+
+  const response = await fetch('/api/import/sbml', {
+    method: 'POST',
+    body: form,
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to import SBML file');
+  }
+  return response.json();
+}

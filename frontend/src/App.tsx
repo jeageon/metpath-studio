@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, EdgeSingular, ElementDefinition } from 'cytoscape';
 
-import { fetchPathway } from './api';
+import { fetchPathway, importSbml } from './api';
 import type { EdgeStatus, PathwayEdge, PathwayResponse } from './types';
 
 interface EdgeLegend {
@@ -11,12 +11,24 @@ interface EdgeLegend {
   downregulated: number;
   removed: number;
   cassette: number;
+  overlay: number;
 }
 
 interface LegendConfig {
   label: string;
   color: string;
   width: number;
+}
+
+interface CsvOverlayRecord {
+  id: string;
+  value: number;
+}
+
+interface OverlaySummary {
+  count: number;
+  min: number;
+  max: number;
 }
 
 const STATUS_LABELS: Record<EdgeStatus, LegendConfig> = {
@@ -41,7 +53,14 @@ function routeOffsetForIndex(index: number): number {
 }
 
 function emptyLegend(): EdgeLegend {
-  return { normal: 0, upregulated: 0, downregulated: 0, removed: 0, cassette: 0 };
+  return {
+    normal: 0,
+    upregulated: 0,
+    downregulated: 0,
+    removed: 0,
+    cassette: 0,
+    overlay: 0,
+  };
 }
 
 function sanitizePathwayId(value: string): string {
@@ -81,6 +100,120 @@ function toDisplayFromData(edge: EdgeSingular): string {
   const label = String(edge.data('base_label') || edge.data('label') || 'reaction');
   const annotation = String(edge.data('annotation') || '').trim();
   return `${label}${annotation ? ` | ${annotation}` : ''}`;
+}
+
+function parseCsvLine(rawLine: string): string[] {
+  const out: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < rawLine.length; i += 1) {
+    const char = rawLine[i];
+    if (char === '"') {
+      if (inQuotes && rawLine[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      out.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  out.push(current.trim());
+  return out.map((value) => (value.startsWith('"') && value.endsWith('"') ? value.slice(1, -1) : value));
+}
+
+function normalizeOverlayId(value: string): string {
+  const compact = value.trim().toLowerCase();
+  if (!compact) {
+    return compact;
+  }
+  return compact.startsWith('rn:') ? compact.slice(3) : compact;
+}
+
+function parseCsvOverlay(fileText: string): CsvOverlayRecord[] {
+  const lines = fileText
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return [];
+  }
+
+  const firstLine = parseCsvLine(lines[0] || '');
+  const hasHeader =
+    firstLine.some((col) => col.toLowerCase().includes('id')) &&
+    firstLine.some((col) => col.toLowerCase().includes('value'));
+
+  const startIndex = hasHeader ? 1 : 0;
+  const idIndex = hasHeader ? firstLine.findIndex((col) => /id|reaction|gene/i.test(col)) : 0;
+  const valueIndex = hasHeader ? firstLine.findIndex((col) => /log2|fold|value|flux|fc/i.test(col)) : 1;
+
+  const rows = new Map<string, number>();
+  for (let i = startIndex; i < lines.length; i += 1) {
+    const line = parseCsvLine(lines[i]);
+    if (line.length === 0) {
+      continue;
+    }
+
+    const rawId = normalizeOverlayId(line[idIndex] || '');
+    const rawValue = parseFloat((line[valueIndex] || '').replace(/,/g, '').trim());
+    if (!rawId || Number.isNaN(rawValue)) {
+      continue;
+    }
+
+    rows.set(rawId, rawValue);
+    const rnKey = normalizeOverlayId(`rn:${rawId}`);
+    rows.set(rnKey, rawValue);
+  }
+
+  return [...rows].map(([id, value]) => ({ id, value }));
+}
+
+function overlayValueForEdge(edge: EdgeSingular, lookup: Map<string, number>): number | null {
+  const candidates = new Set<string>();
+  candidates.add(normalizeOverlayId(String(edge.data('reaction_id') || '')));
+  candidates.add(normalizeOverlayId(String(edge.data('label') || '')));
+  candidates.add(normalizeOverlayId(edge.id()));
+  candidates.add(normalizeOverlayId(String(edge.data('base_label') || '')));
+  candidates.add(`rn:${normalizeOverlayId(String(edge.data('reaction_id') || ''))}`);
+
+  const rawLabel = String(edge.data('base_label') || '').toLowerCase();
+  const labelTerms = rawLabel.split('|')[0].split(/[\s,]/).map((term) => term.trim()).filter(Boolean);
+  labelTerms.forEach((term) => {
+    candidates.add(normalizeOverlayId(term));
+    candidates.add(`rn:${normalizeOverlayId(term)}`);
+  });
+
+  for (const candidate of candidates) {
+    const value = lookup.get(candidate);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function gradientForValue(value: number, minValue: number, maxValue: number): string {
+  if (minValue === maxValue) {
+    return '#7f57e6';
+  }
+
+  const t = (value - minValue) / (maxValue - minValue);
+  const clamped = Math.max(0, Math.min(1, t));
+  const blue = { r: 45, g: 88, b: 165 };
+  const red = { r: 211, g: 47, b: 47 };
+  const r = Math.round(blue.r + (red.r - blue.r) * clamped);
+  const g = Math.round(blue.g + (red.g - blue.g) * clamped);
+  const b = Math.round(blue.b + (red.b - blue.b) * clamped);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function setEdgeLabel(edge: EdgeSingular): void {
@@ -131,8 +264,63 @@ function refreshLegend(core: Core | null): EdgeLegend {
     if (annotation) {
       legend.cassette += 1;
     }
+
+    if (String(edge.data('overlay_value') || '').trim()) {
+      legend.overlay += 1;
+    }
   });
   return legend;
+}
+
+function applyCsvOverlay(core: Core | null, fileText: string): OverlaySummary | null {
+  if (!core) {
+    return null;
+  }
+
+  const entries = parseCsvOverlay(fileText);
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const lookup = new Map<string, number>();
+  entries.forEach((entry) => {
+    lookup.set(entry.id, entry.value);
+  });
+
+  const matched: { edge: EdgeSingular; value: number }[] = [];
+
+  core.edges().forEach((edge) => {
+    edge.removeData('overlay_value');
+    edge.removeData('overlay_color');
+    edge.removeData('overlay_width');
+
+    const value = overlayValueForEdge(edge, lookup);
+    if (value === null) {
+      return;
+    }
+    matched.push({ edge, value });
+  });
+
+  if (matched.length === 0) {
+    return { count: 0, min: 0, max: 0 };
+  }
+
+  const values = matched.map((item) => item.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+
+  matched.forEach(({ edge, value }) => {
+    const width = 2 + ((value - minValue) / (maxValue - minValue || 1)) * 8;
+    edge.data('overlay_value', String(value));
+    edge.data('overlay_color', gradientForValue(value, minValue, maxValue));
+    edge.data('overlay_width', width.toFixed(2));
+  });
+
+  return {
+    count: matched.length,
+    min: minValue,
+    max: maxValue,
+  };
 }
 
 function refreshDecorators(core: Core | null): void {
@@ -227,8 +415,11 @@ export default function App(): JSX.Element {
   const [curveValue, setCurveValue] = useState(20);
   const [legendCounts, setLegendCounts] = useState<EdgeLegend>(emptyLegend());
   const [routingMode, setRoutingMode] = useState<EdgeRoutingMode>('bezier');
+  const [overlaySummary, setOverlaySummary] = useState<OverlaySummary | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const csvUploadRef = useRef<HTMLInputElement | null>(null);
+  const sbmlUploadRef = useRef<HTMLInputElement | null>(null);
   const cyRef = useRef<Core | null>(null);
 
   const elements = useMemo((): ElementDefinition[] => {
@@ -439,6 +630,14 @@ export default function App(): JSX.Element {
           },
         },
         {
+          selector: 'edge[overlay_value]',
+          style: {
+            'line-color': 'data(overlay_color)',
+            'target-arrow-color': 'data(overlay_color)',
+            width: 'data(overlay_width)',
+          },
+        },
+        {
           selector: '.hidden',
           style: { display: 'none' },
         },
@@ -554,6 +753,7 @@ export default function App(): JSX.Element {
       setHideCofactors(false);
       setCurveValue(20);
       setRoutingMode('bezier');
+      setOverlaySummary(null);
       setEdgeAnnotation('');
       setSelectedEdgeIds([]);
     } catch (e: unknown) {
@@ -563,6 +763,81 @@ export default function App(): JSX.Element {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onLoadSbml = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    event.target.value = '';
+    setLoading(true);
+    setError('');
+    try {
+      const result = await importSbml(file);
+      setPathway(result);
+      setHideCofactors(false);
+      setCurveValue(20);
+      setRoutingMode('bezier');
+      setOverlaySummary(null);
+      setEdgeAnnotation('');
+      setSelectedEdgeIds([]);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'SBML 파일을 불러오지 못했습니다.');
+      setPathway(null);
+      setLegendCounts(emptyLegend());
+      setOverlaySummary(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onUploadCsv = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    event.target.value = '';
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || '');
+      const core = cyRef.current;
+      if (!core) {
+        setError('그래프가 로드되지 않았습니다.');
+        return;
+      }
+      const summary = applyCsvOverlay(core, text);
+      setLegendCounts(refreshLegend(core));
+      refreshDecorators(core);
+      if (!summary || summary.count === 0) {
+        setOverlaySummary(summary);
+        setError('매칭되는 반응 ID가 없어 오버레이가 적용되지 않았습니다.');
+      } else {
+        setOverlaySummary(summary);
+        setError('');
+      }
+    };
+    reader.onerror = () => {
+      setError('CSV 파일을 읽을 수 없습니다.');
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const onClearOverlay = () => {
+    const core = cyRef.current;
+    if (!core) {
+      return;
+    }
+    core.edges().forEach((edge) => {
+      edge.removeData('overlay_value');
+      edge.removeData('overlay_color');
+      edge.removeData('overlay_width');
+    });
+    setOverlaySummary(null);
+    setLegendCounts(refreshLegend(core));
+    refreshDecorators(core);
   };
 
   const onDeleteSelection = () => {
@@ -694,6 +969,16 @@ export default function App(): JSX.Element {
           <button onClick={onLoadPathway} disabled={loading}>
             {loading ? '불러오는 중...' : 'Load KEGG'}
           </button>
+          <input
+            ref={sbmlUploadRef}
+            type="file"
+            accept=".sbml,.xml,application/xml,text/xml"
+            className="file-input"
+            onChange={onLoadSbml}
+          />
+          <button onClick={() => sbmlUploadRef.current?.click()}>
+            SBML 임포트
+          </button>
           <button onClick={onDeleteSelection} className="warn">
             선택 항목 삭제
           </button>
@@ -706,7 +991,7 @@ export default function App(): JSX.Element {
           </button>
         </div>
 
-          <div className="control-row">
+        <div className="control-row">
             <button onClick={() => applyEdgeStatus('upregulated')}>Upregulated</button>
             <button onClick={() => applyEdgeStatus('downregulated')}>Downregulated</button>
             <button onClick={() => applyEdgeStatus('removed')}>Knock-out</button>
@@ -740,6 +1025,19 @@ export default function App(): JSX.Element {
         <div className="control-row">
           <button onClick={applyTcaRing}>TCA Ring 정렬</button>
           <button onClick={applyGlycolysisFlow}>Glycolysis 수직 정렬</button>
+          <input
+            ref={csvUploadRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="file-input"
+            onChange={onUploadCsv}
+          />
+          <button onClick={() => csvUploadRef.current?.click()}>
+            CSV 오버레이 업로드
+          </button>
+          <button onClick={onClearOverlay} className="warn">
+            오버레이 초기화
+          </button>
           <label className="annotation">
             카세트 텍스트 박스
             <input
@@ -793,6 +1091,13 @@ export default function App(): JSX.Element {
             <li>
               <span style={{ width: 10, background: '#607d8b' }} />
               KO mark(✕): {legendCounts.removed}
+            </li>
+            <li>
+              <span style={{ width: 10, background: '#7f57e6' }} />
+              CSV Overlay: {overlaySummary ? `${overlaySummary.count}개` : '0개'}
+              {overlaySummary && overlaySummary.count > 0
+                ? ` (min=${overlaySummary.min.toFixed(3)}, max=${overlaySummary.max.toFixed(3)})`
+                : ''}
             </li>
           </ul>
           <p>선택 엣지 다중선택 가능, 드래그로 레이아웃 수정</p>

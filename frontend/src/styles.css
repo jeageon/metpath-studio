@@ -118,6 +118,10 @@ body {
   color: #223a55;
 }
 
+.file-input {
+  display: none;
+}
+
 .control-row label {
   white-space: nowrap;
 }

@@ -4,6 +4,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from math import cos, pi, sin
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from .models import MetaboliteNode, PathwayResponse, ReactionEdge
@@ -62,6 +63,14 @@ def _parse_float(value: str, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _local_tag_name(tag: str) -> str:
+    return tag.split("}", 1)[-1] if tag.startswith("{") else tag
+
+
+def _iter_local_elements(root: ET.Element, tag_name: str) -> List[ET.Element]:
+    return [node for node in root.iter() if _local_tag_name(node.tag) == tag_name]
 
 
 def _is_cofactor(node_id: str, label: str) -> bool:
@@ -351,5 +360,135 @@ def build_metabolic_graph(pathway_id: str, hide_cofactors: bool = False) -> Path
             "cofactor_filter": hide_cofactors,
             "node_count": len(result.nodes),
             "edge_count": len(result.edges),
+        },
+    )
+
+
+def build_metabolic_graph_from_sbml(sbml_text: bytes) -> PathwayResponse:
+    try:
+        root = ET.fromstring(sbml_text)
+    except Exception as exc:
+        raise RuntimeError(f"Invalid SBML file: {exc}") from exc
+
+    species_nodes: Dict[str, Dict[str, str]] = {}
+    for species in _iter_local_elements(root, "species"):
+        species_id = species.attrib.get("id") or species.attrib.get("name")
+        if not species_id:
+            continue
+        if species_id in species_nodes:
+            continue
+        species_nodes[species_id] = {
+            "id": species_id,
+            "label": species.attrib.get("name", species_id),
+        }
+
+    if not species_nodes:
+        raise RuntimeError("No species found in SBML model")
+
+    node_ids = list(species_nodes.keys())
+    node_count = len(node_ids)
+    angle_step = 2 * pi / max(node_count, 1)
+    radius = min(560, max(170, node_count * 28))
+    center_x = 640
+    center_y = 420
+    nodes: List[MetaboliteNode] = []
+    for index, species_id in enumerate(node_ids):
+        angle = angle_step * index
+        nodes.append(
+            MetaboliteNode(
+                id=species_nodes[species_id]["id"],
+                label=species_nodes[species_id]["label"],
+                x=center_x + radius * cos(angle),
+                y=center_y + radius * sin(angle),
+                is_cofactor=False,
+                raw_id=species_id,
+                metadata={"original_type": "sbml_species"},
+            )
+        )
+
+    edges: List[ReactionEdge] = []
+    seen_edges: Set[Tuple[str, str, str]] = set()
+    for reaction in _iter_local_elements(root, "reaction"):
+        reaction_id = reaction.attrib.get("id") or reaction.attrib.get("name") or "reaction"
+        reaction_name = reaction.attrib.get("name", reaction_id)
+        reversible = reaction.attrib.get("reversible", "false").lower() in {"true", "1", "yes"}
+        substrates: List[str] = []
+        products: List[str] = []
+
+        for child in list(reaction):
+            if _local_tag_name(child.tag) == "listOfReactants":
+                for ref in list(child):
+                    if _local_tag_name(ref.tag) == "speciesReference":
+                        species_ref = ref.attrib.get("species")
+                        if species_ref:
+                            substrates.append(species_ref)
+            elif _local_tag_name(child.tag) == "listOfProducts":
+                for ref in list(child):
+                    if _local_tag_name(ref.tag) == "speciesReference":
+                        species_ref = ref.attrib.get("species")
+                        if species_ref:
+                            products.append(species_ref)
+
+        if not substrates or not products:
+            continue
+
+        for substrate in substrates:
+            for product in products:
+                if substrate not in species_nodes or product not in species_nodes:
+                    continue
+                if substrate == product:
+                    continue
+                edge_key = (reaction_id, substrate, product)
+                if edge_key in seen_edges:
+                    continue
+                seen_edges.add(edge_key)
+                edges.append(
+                    ReactionEdge(
+                        id=f"{reaction_id}:{substrate}->{product}",
+                        source=substrate,
+                        target=product,
+                        label=_reaction_display_label(reaction_name, reaction_id),
+                        reaction_id=reaction_id,
+                        reaction_name=reaction_name,
+                        reversible=reversible,
+                        enzymes=[],
+                        status="normal",
+                        annotation="",
+                        metadata={"kgml_type": "sbml_reaction", "source_id": reaction_id},
+                    )
+                )
+                if reversible:
+                    reverse_key = (f"{reaction_id}_rev", product, substrate)
+                    if reverse_key in seen_edges:
+                        continue
+                    seen_edges.add(reverse_key)
+                    edges.append(
+                        ReactionEdge(
+                            id=f"{reaction_id}_rev:{product}->{substrate}",
+                            source=product,
+                            target=substrate,
+                            label=_reaction_display_label(reaction_name, reaction_id),
+                            reaction_id=reaction_id,
+                            reaction_name=reaction_name,
+                            reversible=True,
+                            enzymes=[],
+                            status="normal",
+                            annotation="",
+                            metadata={"kgml_type": "sbml_reaction", "source_id": reaction_id},
+                        )
+                    )
+
+    if not edges:
+        raise RuntimeError("No valid reactions found in SBML file")
+
+    return PathwayResponse(
+        pathway_id="sbml_import",
+        pathway_name="SBML import",
+        nodes=nodes,
+        edges=edges,
+        metadata={
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "source": "sbml_import",
         },
     )
