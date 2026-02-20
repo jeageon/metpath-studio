@@ -32,6 +32,11 @@ interface OverlaySummary {
   max: number;
 }
 
+interface QuickPathway {
+  id: string;
+  label: string;
+}
+
 const STATUS_LABELS: Record<EdgeStatus, LegendConfig> = {
   normal: { label: 'Normal', color: '#455a64', width: 3 },
   upregulated: { label: 'Upregulated', color: '#d32f2f', width: 6 },
@@ -44,6 +49,13 @@ const KO_MARK_NODE_SUFFIX = '_ko_mark';
 const CASSETTE_SUFFIX = '_cassette';
 const ORTHOGONAL_STEP_BASE = 36;
 const VERTICAL_FLOW_GAP = 88;
+const QUICK_PATHWAYS: QuickPathway[] = [
+  { id: 'eco00670', label: 'Eco00670 · One-carbon pool' },
+  { id: 'eco00010', label: 'Eco00010 · Glycolysis' },
+  { id: 'eco00020', label: 'Eco00020 · TCA cycle' },
+  { id: 'eco00710', label: 'Eco00710 · Carbon fixation' },
+  { id: 'eco00030', label: 'Eco00030 · Pentose phosphate' },
+];
 
 type EdgeRoutingMode = 'bezier' | 'orthogonal';
 
@@ -846,12 +858,13 @@ export default function App(): JSX.Element {
     refreshDecorators(core);
   }, [routingMode]);
 
-  const onLoadPathway = async () => {
-    const id = sanitizePathwayId(pathwayIdInput);
+  const onLoadPathwayById = async (rawId: string) => {
+    const id = sanitizePathwayId(rawId);
     if (!id) {
       setError('Pathway ID를 입력해주세요.');
       return;
     }
+    setPathwayIdInput(id);
     setLoading(true);
     setError('');
     try {
@@ -870,6 +883,14 @@ export default function App(): JSX.Element {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onLoadPathway = async () => {
+    await onLoadPathwayById(pathwayIdInput);
+  };
+
+  const onLoadQuickPathway = (pathwayId: string) => {
+    void onLoadPathwayById(pathwayId);
   };
 
   const onLoadSbml = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -899,6 +920,7 @@ export default function App(): JSX.Element {
       setLoading(false);
     }
   };
+
 
   const onUploadCsv = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1149,6 +1171,19 @@ export default function App(): JSX.Element {
             >
               {hideCofactors ? '조효소 숨김 취소' : '조효소 일괄 숨김'}
             </button>
+          </div>
+          <label className="control-label">빠른 경로 바로가기</label>
+          <div className="quick-links">
+            {QUICK_PATHWAYS.map((pathwayEntry) => (
+              <button
+                key={pathwayEntry.id}
+                className="quick-link"
+                onClick={() => onLoadQuickPathway(pathwayEntry.id)}
+                disabled={loading}
+              >
+                {pathwayEntry.label}
+              </button>
+            ))}
           </div>
         </div>
 

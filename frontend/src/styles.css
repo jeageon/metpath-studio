@@ -239,6 +239,30 @@ button.active,
   padding: 6px 10px;
 }
 
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quick-link {
+  background: #fff4e1;
+  border-color: #ffd080;
+  color: #6b4d12;
+  padding: 7px 11px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.quick-link:hover:not(:disabled) {
+  background: #ffe4a8;
+  border-color: #ffc255;
+}
+
+.quick-link:disabled {
+  opacity: 0.55;
+}
+
 .canvas-wrap {
   display: grid;
   grid-template-columns: 1fr 240px;
