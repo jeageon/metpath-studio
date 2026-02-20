@@ -7,26 +7,52 @@ React + Cytoscape front-end renders editable canvas and exports SVG/PNG/TIFF.
 
 ## Quick start
 
+### 원클릭(권장) 실행: 스크립트 한 번으로 바로 시작
+
+```bash
+cd "/Users/jg/Documents/MetPath Studio"
+bash scripts/run-local.sh
+```
+
+Stop:
+
+```bash
+bash scripts/stop-local.sh
+```
+
+### 포트 기본값
+
+- Backend: `8000` (`METPATH_BACKEND_PORT`)
+- Frontend: `5173` (`METPATH_FRONTEND_PORT`)
+
+예시:
+
+```bash
+METPATH_BACKEND_PORT=8001 METPATH_FRONTEND_PORT=4173 bash scripts/run-local.sh
+```
+
+### 수동 실행(설치만 분리)
+
 Backend
 ```bash
 cd "/Users/jg/Documents/MetPath Studio/backend"
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m pip install -r requirements.txt
+python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Frontend
 ```bash
 cd "/Users/jg/Documents/MetPath Studio/frontend"
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Visit:
-- Frontend: `http://localhost:5173`
-- Backend health: `http://localhost:8000/health`
-- Sample API: `http://localhost:8000/api/pathway/eco00670`
+- Frontend: `http://127.0.0.1:5173`
+- Backend health: `http://127.0.0.1:8000/health`
+- Sample API: `http://127.0.0.1:8000/api/pathway/eco00670`
 
 ## Current phase
 
