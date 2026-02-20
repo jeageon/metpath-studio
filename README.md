@@ -3,7 +3,7 @@ MetPath Studio
 
 Phase 1 + 2 + 3 MVP scaffold for KEGG-based metabolic map visualization:
 FastAPI backend translates KEGG KGML to a metabolite-centered JSON model,
-React + Cytoscape front-end renders editable canvas and exports SVG.
+React + Cytoscape front-end renders editable canvas and exports SVG/PDF.
 
 ## Quick start
 
@@ -39,7 +39,7 @@ This repository currently implements Phase 1 + Phase 2 core + Phase 3 routing/al
 6) KO center X marker
 7) cassette text attachment as snapped decorator nodes near reaction
 8) automatic legend by canvas-visible style usage
-9) SVG export helper
+9) SVG/PDF export helper
 10) edge routing preset (Bezier / Orthogonal) with segment offsets
 11) template-alignment actions for selected nodes (TCA Ring, Glycolysis vertical flow)
 
