@@ -1,7 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, EdgeSingular, ElementDefinition } from 'cytoscape';
-import { jsPDF } from 'jspdf';
 
 import { fetchPathway, importSbml } from './api';
 import type { EdgeStatus, PathwayEdge, PathwayResponse } from './types';
@@ -283,19 +282,6 @@ function overlayValueForEdge(edge: EdgeSingular, lookup: Map<string, number>): n
   }
 
   return null;
-}
-
-function pxToMm(px: number): number {
-  return (px * 25.4) / 96;
-}
-
-function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('failed to decode image'));
-    image.src = dataUrl;
-  });
 }
 
 function gradientForValue(value: number, minValue: number, maxValue: number): string {
@@ -1045,46 +1031,6 @@ export default function App(): JSX.Element {
     link.click();
   };
 
-  const exportPdf = async () => {
-    const core = cyRef.current;
-    if (!core) {
-      return;
-    }
-
-    const png = core.png({ full: true, bg: '#fff', scale: 2, quality: 1 });
-    if (!png) {
-      setError('PDF Export용 PNG 생성에 실패했습니다.');
-      return;
-    }
-
-    try {
-      const image = await loadImageFromDataUrl(png);
-      const imageWidth = image.naturalWidth || 0;
-      const imageHeight = image.naturalHeight || 0;
-      if (!imageWidth || !imageHeight) {
-        setError('PDF Export용 이미지 크기 계산에 실패했습니다.');
-        return;
-      }
-
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const widthMm = pxToMm(imageWidth);
-      const heightMm = pxToMm(imageHeight);
-      const scale = Math.min(pageWidth / widthMm, pageHeight / heightMm) * 0.95;
-      const renderWidth = widthMm * scale;
-      const renderHeight = heightMm * scale;
-      const offsetX = (pageWidth - renderWidth) / 2;
-      const offsetY = (pageHeight - renderHeight) / 2;
-
-      pdf.addImage(png, 'PNG', offsetX, offsetY, renderWidth, renderHeight);
-      pdf.save(`${pathway?.pathway_id || 'pathway'}_${Date.now()}.pdf`);
-      setError('');
-    } catch {
-      setError('PDF Export 중 오류가 발생했습니다.');
-    }
-  };
-
   return (
     <div className="app-root">
       <header className="hero">
@@ -1189,7 +1135,6 @@ export default function App(): JSX.Element {
 
         <div className="control-row footer-actions">
           <button onClick={exportSvg}>SVG Export</button>
-          <button onClick={exportPdf}>PDF Export</button>
           <span className="selection-pill">
             선택 엣지: {selectedEdgeIds.length}
           </span>
